@@ -3,7 +3,7 @@
 # MainTained by Alan
 # Contact: alan@sinosims.com
 
-import MySQLdb, apnsclient, ConfigParser, sys, redis, time, logging, traceback
+import MySQLdb, apnsclient, ConfigParser, sys, redis, time, logging, traceback, base64
 
 def _log_(lv, obj):
     sys.stdout.write("[%s] %s %s\n"%(time.strftime("%Y-%m-%d %H:%M:%S"), lv, obj))
@@ -31,10 +31,10 @@ class RingAsyn(Asyn):
     def run(self):
         ring = self._redis.lpop('System:Ring')
         if not ring: return False
+        _log_('PS', ring)
         toks = ring.split(',')
         msg = apnsclient.Message(toks[0:-2], alert=u"%s \u6765\u7535..."%toks[-2], badge=1)
         self._srv.send(msg)
-        _log_('PS', ring)
         return True
 
 class CallAsyn(Asyn):
@@ -51,30 +51,108 @@ class CallAsyn(Asyn):
         nc = self._redis.lpop('System:Calls')
 
         if not nc: return False
+        _log_('PO', nc)
 
         ch = self._redis.hgetall('Call:%s:info'%nc)
-
+        uid = ch.get('uid', None)
         if len(ch) > 8:
             n = 0
             try:
-                sql = "insert into calling values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                param = (ch['id'], ch['cdid'], ch['cpid'], ch['bid'], ch['uid'], ch['oth'], int(ch['typ']), ch.get('rid', ''), int(ch['st']), int(ch['ed']))
+                cmid = ch['inum'] + ch['id'][-16:]
+                sql = "insert into calling (id, cdid, cpid, bid, uid, oth, fnum, inum, loc, seq, typ, rid, st, ed) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                param = (cmid, ch['cdid'], ch['cpid'], ch['bid'], uid, ch['oth'], ch['fnum'], ch['inum'], ch['loc'], ch['id'], int(ch['typ']), ch.get('rid', ''), int(ch['st']), int(ch['ed']))
                 n = self._cursor.execute(sql, param)
             except Exception, e:
                 _logerr_(traceback.format_exc())
             if n == 1:
-                self._redis.zadd('User:%s:oth:%s:voices'%(ch['uid'], ch['oth']), ch['id'], int(ch['id'][-16:]))
-                self._redis.zadd('User:%s:oths'%ch['uid'], ch['id'][:-16:], int(ch['id'][-16:])) 
-                _log_('SQ', "%s %s %s"%(ch['id'], ch['id'][-16:], ch['id'][:-16:]))
+                if uid and uid != '':
+                    _script = """
+                        redis.call('zadd', 'User:'..KEYS[1]..':oths', KEYS[3], KEYS[2])
+                        redis.call('zadd', 'User:'..KEYS[1]..':oth:'..KEYS[2]..':voices', KEYS[3], KEYS[2]..KEYS[3])
+                    """
+                    self._redis.eval(_script, 3, uid, ch['inum'], ch['id'][-16:])
+                else:
+                    _script = """
+                        local ids = redis.call('zrange', 'Box:'..KEYS[4]..':Users', 0, -1)
+                        for k, v in pairs(ids) do
+                            redis.call('zadd', 'User:'..v..':oths', KEYS[3], KEYS[2])
+                            redis.call('zadd', 'User:'..v..':oth:'..KEYS[2]..':voices', KEYS[3], KEYS[2]..KEYS[3])
+                        end
+                    """
+                    self._redis.eval(_script, 4, uid, ch['inum'], ch['id'][-16:], ch['bid']) 
             else:
-                esql = sql%param
-                _log_('ER', "%d EXE SQL %s"%(n, esql))
+                _log_('ER', "%d %s"%(n, repr(param)))
         else:
             _log_('ER', "Call %s no info"%nc)
                 
         self._conn.commit()
         return True    
 
+class SmsingAsyn(Asyn):
+    def __init__(self, poo, env):
+        self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
+        super(SmsingAsyn, self).__init__(poo, env)
+
+    def run(self):
+        sms = self._redis.lpop('System:Smsing')
+        if not sms: return False
+        _log_('PS', sms)
+        toks = sms.split(',')
+        s = self._redis.hgetall('Sms:%s:info'%toks[-1])
+        msg = apnsclient.Message(toks[0:-1], alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), badge=1)
+        self._srv.send(msg)
+        return True
+
+class SmsAsyn(Asyn):
+    def __init__(self, poo, env):
+        mcfg = ConfigParser.ConfigParser()
+        mcfg.read("%s/%s/mysql.ini"%(poo, env))
+
+        self._conn = MySQLdb.connect(host=mcfg.get('mysql', 'host'), db=mcfg.get('mysql', 'db'), user=mcfg.get('mysql', 'usr'), passwd=mcfg.get('mysql', 'pwd'), charset="utf8")
+        self._conn.ping(True)
+        self._cursor = self._conn.cursor()
+        super(SmsAsyn, self).__init__(poo, env)
+
+    def run(self):
+        nc = self._redis.lpop('System:Sms')
+
+        if not nc: return False
+        _log_('PO', nc)
+        sh = self._redis.hgetall('Sms:%s:info'%nc)
+        uid = sh.get('uid', None)
+        if len(sh) > 7:
+            n = 0
+            try:
+                sql = "insert into sms (id, cdid, cpid, bid, uid, oth, fnum, inum, loc, msg, st, ed) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                param = (sh['id'], sh['cdid'], sh['cpid'], sh['bid'], uid, sh['oth'], sh['fnum'], sh['inum'], sh['loc'], sh['msg'], int(sh['st']), int(sh['ed']))
+                n = self._cursor.execute(sql, param)
+            except Exception, e:
+                raise e
+                _logerr_(traceback.format_exc())
+                return False
+            if n == 1:
+                if uid:
+                    _script = """
+                        redis.call('zadd', 'User:'..KEYS[1]..':othsms', KEYS[3], KEYS[2])
+                        redis.call('zadd', 'User:'..KEYS[1]..':othsms:'..KEYS[2]..':sms', KEYS[3], KEYS[2]..KEYS[3])
+                    """
+                    self._redis.eval(_script, 3, uid, sh['id'][:-16:], sh['id'][-16:])
+                else:
+                    _script = """
+                        local ids = redis.call('zrange', 'Box:'..KEYS[4]..':Users', 0, -1)
+                        for k, v in pairs(ids) do
+                            redis.call('zadd', 'User:'..v..':othsms', KEYS[3], KEYS[2])
+                            redis.call('zadd', 'User:'..v..':othsms:'..KEYS[2]..':sms', KEYS[3], KEYS[2]..KEYS[3])
+                        end
+                    """
+                    self._redis.eval(_script, 4, uid, sh['id'][:-16:], sh['id'][-16:], sh['bid'])
+            else:
+                _log_('ER', "%d %s"%(n, repr(param)))
+        else:
+            _log_('ER', "SMS %s no info"%nc)
+
+        self._conn.commit()
+        return True 
 
 def main():
     env = sys.argv[3] if len(sys.argv) > 3 else 'test'
@@ -84,6 +162,10 @@ def main():
         asyn = RingAsyn(sys.argv[2], env)
     elif sys.argv[1] == 'call':
         asyn = CallAsyn(sys.argv[2], env)
+    elif sys.argv[1] == 'smsing':
+        asyn = SmsingAsyn(sys.argv[2], env)
+    elif sys.argv[1] == 'sms':
+        asyn = SmsAsyn(sys.argv[2], env)
     else:
         return help()
 
