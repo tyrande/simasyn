@@ -3,7 +3,9 @@
 # MainTained by Alan
 # Contact: alan@sinosims.com
 
-import MySQLdb, apnsclient, ConfigParser, sys, redis, time, logging, traceback, base64
+# import MySQLdb, apnsclient, ConfigParser, sys, redis, time, logging, traceback, base64
+import MySQLdb, apns, ConfigParser, sys, redis, time, logging, traceback, base64
+
 
 def _log_(lv, obj):
     sys.stdout.write("[%s] %s %s\n"%(time.strftime("%Y-%m-%d %H:%M:%S"), lv, obj))
@@ -25,7 +27,8 @@ class Asyn(object):
 
 class RingAsyn(Asyn):
     def __init__(self, poo, env):
-        self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
+        # self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
+        self._srv = apns.APNs(use_sandbox=True, cert_file="%s/%s/ca/simhub.pem"%(poo, env))
         super(RingAsyn, self).__init__(poo, env)
 
     def run(self):
@@ -33,8 +36,10 @@ class RingAsyn(Asyn):
         if not ring: return False
         _log_('PS', ring)
         toks = ring.split(',')
-        msg = apnsclient.Message(toks[0:-2], alert=u"%s \u6765\u7535..."%toks[-2], badge=1)
-        self._srv.send(msg)
+        # msg = apnsclient.Message(toks[0:-2], alert=u"%s \u6765\u7535..."%toks[-2], badge=1)
+        # self._srv.send(msg)
+        payload = apns.Payload(alert=u"%s \u6765\u7535..."%toks[-2], sound="default", badge=1)
+        [ self._srv.gateway_server.send_notification(t, payload) for t in toks[0:-2] ]
         return True
 
 class CallAsyn(Asyn):
@@ -90,7 +95,8 @@ class CallAsyn(Asyn):
 
 class SmsingAsyn(Asyn):
     def __init__(self, poo, env):
-        self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
+        # self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
+        self._srv = apns.APNs(use_sandbox=True, cert_file="%s/%s/ca/simhub.pem"%(poo, env))
         super(SmsingAsyn, self).__init__(poo, env)
 
     def run(self):
@@ -99,8 +105,10 @@ class SmsingAsyn(Asyn):
         _log_('PS', sms)
         toks = sms.split(',')
         s = self._redis.hgetall('Sms:%s:info'%toks[-1])
-        msg = apnsclient.Message(toks[0:-1], alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), badge=1)
-        self._srv.send(msg)
+        # msg = apnsclient.Message(toks[0:-1], alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), badge=1)
+        # self._srv.send(msg)
+        payload = apns.Payload(alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), sound="default", badge=1)
+        [ self._srv.gateway_server.send_notification(t, payload) for t in toks[0:-1] ]
         return True
 
 class SmsAsyn(Asyn):
