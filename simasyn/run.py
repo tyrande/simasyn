@@ -28,13 +28,19 @@ class Asyn(object):
 class RingAsyn(Asyn):
     def __init__(self, poo, env):
         # self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
-        self._srv = apns.APNs(use_sandbox=True, cert_file="%s/%s/ca/simhub.pem"%(poo, env))
+        self._certFile = "%s/%s/ca/simhub.pem"%(poo, env)
+        self._srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
+        self._connStart = time.time()
         super(RingAsyn, self).__init__(poo, env)
 
     def run(self):
         ring = self._redis.lpop('System:Ring')
         if not ring: return False
         _log_('PS', ring)
+        now = time.time()
+        if now - self._connStart > 300:
+            self._srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
+            self._connStart = now 
         toks = ring.split(',')
         # msg = apnsclient.Message(toks[0:-2], alert=u"%s \u6765\u7535..."%toks[-2], badge=1)
         # self._srv.send(msg)
