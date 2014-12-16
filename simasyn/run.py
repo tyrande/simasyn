@@ -44,8 +44,8 @@ class RingAsyn(Asyn):
         toks = ring.split(',')
         # msg = apnsclient.Message(toks[0:-2], alert=u"%s \u6765\u7535..."%toks[-2], badge=1)
         # self._srv.send(msg)
-        payload = apns.Payload(alert=u"%s \u6765\u7535..."%toks[-2], sound="default", badge=1)
-        [ self._srv.gateway_server.send_notification(t, payload) for t in toks[0:-2] ]
+        payload = apns.Payload(alert=u"%s \u6765\u7535..."%toks[-2], sound="income_ring.caf", badge=1)
+        [ self._srv.gateway_server.send_notification(t, payload) for t in set(toks[0:-2]) ]
         return True
 
 class CallAsyn(Asyn):
@@ -114,7 +114,7 @@ class SmsingAsyn(Asyn):
         # msg = apnsclient.Message(toks[0:-1], alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), badge=1)
         # self._srv.send(msg)
         payload = apns.Payload(alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), sound="default", badge=1)
-        [ self._srv.gateway_server.send_notification(t, payload) for t in toks[0:-1] ]
+        [ self._srv.gateway_server.send_notification(t, payload) for t in set(toks[0:-1]) ]
         return True
 
 class SmsAsyn(Asyn):
@@ -148,18 +148,18 @@ class SmsAsyn(Asyn):
                 if uid:
                     _script = """
                         redis.call('zadd', 'User:'..KEYS[1]..':othsms', KEYS[3], KEYS[2])
-                        redis.call('zadd', 'User:'..KEYS[1]..':othsms:'..KEYS[2]..':sms', KEYS[3], KEYS[2]..KEYS[3])
+                        redis.call('zadd', 'User:'..KEYS[1]..':othsms:'..KEYS[2]..':sms', KEYS[4], KEYS[2]..KEYS[3])
                     """
-                    self._redis.eval(_script, 3, uid, sh['id'][:-16:], sh['id'][-16:])
+                    self._redis.eval(_script, 4, uid, sh['id'][:-16:], sh['id'][-16:], sh['st'])
                 else:
                     _script = """
                         local ids = redis.call('zrange', 'Box:'..KEYS[4]..':Users', 0, -1)
                         for k, v in pairs(ids) do
                             redis.call('zadd', 'User:'..v..':othsms', KEYS[3], KEYS[2])
-                            redis.call('zadd', 'User:'..v..':othsms:'..KEYS[2]..':sms', KEYS[3], KEYS[2]..KEYS[3])
+                            redis.call('zadd', 'User:'..v..':othsms:'..KEYS[2]..':sms', KEYS[5], KEYS[2]..KEYS[3])
                         end
                     """
-                    self._redis.eval(_script, 4, uid, sh['id'][:-16:], sh['id'][-16:], sh['bid'])
+                    self._redis.eval(_script, 5, uid, sh['id'][:-16:], sh['id'][-16:], sh['bid'], sh['ed'])
             else:
                 _log_('ER', "%d %s"%(n, repr(param)))
         else:
