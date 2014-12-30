@@ -3,8 +3,8 @@
 
 from fabric.api import local, cd, run, put, env
 
-# env.hosts = [ '114.215.209.188' ]
-env.hosts = [ '115.29.241.227' ]
+env.hosts = [ '114.215.209.188' ]
+# env.hosts = [ '115.29.241.227' ]
 env.user = 'sim'
 env.key_filename = '~/.ssh/id_rsa.pub'
 
@@ -22,6 +22,14 @@ def remote_start_ring():
 def remote_start_call():
     with cd('/home/sim/opt/simasyn'):
         run('/home/sim/opt/simenv/bin/supervisorctl restart call')
+
+def remote_start_smsing():
+    with cd('/home/sim/opt/simasyn'):
+        run('/home/sim/opt/simenv/bin/supervisorctl restart smsing')
+
+def remote_start_sms():
+    with cd('/home/sim/opt/simasyn'):
+        run('/home/sim/opt/simenv/bin/supervisorctl restart sms')
 
 def remote_reload():
     with cd('/home/sim/opt/simasyn'):

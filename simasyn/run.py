@@ -5,7 +5,7 @@
 
 # import MySQLdb, apnsclient, ConfigParser, sys, redis, time, logging, traceback, base64
 import MySQLdb, apns, ConfigParser, sys, redis, time, logging, traceback, base64
-
+import jpush as jpush
 
 def _log_(lv, obj):
     sys.stdout.write("[%s] %s %s\n"%(time.strftime("%Y-%m-%d %H:%M:%S"), lv, obj))
@@ -28,24 +28,41 @@ class Asyn(object):
 class RingAsyn(Asyn):
     def __init__(self, poo, env):
         # self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
-        self._certFile = "%s/%s/ca/simhub.pem"%(poo, env)
-        self._srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
-        self._connStart = time.time()
+        # self._certFile = "%s/%s/ca/simhub.pem"%(poo, env)
+        # self._srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
+        # self.env = env
+        self.apns_production = (env == 'production')
+        self.push = jpush.JPush('2cc802c4b0dbe34b156aadda', '6af7111a7b541cd9bbf0fba8')
+        # self._connStart = time.time()
         super(RingAsyn, self).__init__(poo, env)
 
     def run(self):
         ring = self._redis.lpop('System:Ring')
         if not ring: return False
         _log_('PS', ring)
-        now = time.time()
-        if now - self._connStart > 300:
-            self._srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
-            self._connStart = now 
+#        now = time.time()
+#        if now - self._connStart > 300:
+#            self._srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
+#            self._connStart = now 
         toks = ring.split(',')
         # msg = apnsclient.Message(toks[0:-2], alert=u"%s \u6765\u7535..."%toks[-2], badge=1)
         # self._srv.send(msg)
-        payload = apns.Payload(alert=u"%s \u6765\u7535..."%toks[-2], sound="income_ring.caf", badge=1)
-        [ self._srv.gateway_server.send_notification(t, payload) for t in set(toks[0:-2]) ]
+        # for t in set(toks[0:-2]):
+        #     s = apns.APNs(use_sandbox=True, cert_file=self._certFile)
+        #     payload = apns.Payload(alert=u"%s \u6765\u7535..."%toks[-2], sound="income_ring.caf", badge=1)
+        #     s.gateway_server.send_notification(t, payload)
+
+#        payload = apns.Payload(alert=u"%s \u6765\u7535..."%toks[-2], sound="income_ring.caf", badge=1)
+#        [ self._srv.gateway_server.send_notification(t, payload) for t in set(toks[0:-2]) ]
+        
+        pu = self.push.create_push()
+        pu.audience = {'alias' : toks[0:-2]}
+        # pu.audience = jpush.audience(jpush.alias('f5990b6e3f5941b281c3d3966ab6a494'))
+        # pu.notification = jpush.ios(alert=u"%s \u6765\u7535..."%toks[-2], sound="income_ring.caf", badge=1)
+        pu.notification = jpush.notification(alert=u"%s \u6765\u7535..."%toks[-2], ios={ 'sound' : "income_ring.caf", 'badge' : 1 })
+        pu.platform = jpush.all_
+        pu.options = { 'apns_production' : self.apns_production }
+        pu.send()
         return True
 
 class CallAsyn(Asyn):
@@ -102,7 +119,10 @@ class CallAsyn(Asyn):
 class SmsingAsyn(Asyn):
     def __init__(self, poo, env):
         # self._srv = apnsclient.APNs(apnsclient.Session().get_connection("push_sandbox", cert_file="%s/%s/ca/simhub.pem"%(poo, env)))
-        self._srv = apns.APNs(use_sandbox=True, cert_file="%s/%s/ca/simhub.pem"%(poo, env))
+        # self._certFile = "%s/%s/ca/simhub.pem"%(poo, env)
+        # self._srv = apns.APNs(use_sandbox=True, cert_file="%s/%s/ca/simhub.pem"%(poo, env))
+        self.apns_production = (env == 'production')
+        self.push = jpush.JPush('2cc802c4b0dbe34b156aadda', '6af7111a7b541cd9bbf0fba8')
         super(SmsingAsyn, self).__init__(poo, env)
 
     def run(self):
@@ -113,8 +133,22 @@ class SmsingAsyn(Asyn):
         s = self._redis.hgetall('Sms:%s:info'%toks[-1])
         # msg = apnsclient.Message(toks[0:-1], alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), badge=1)
         # self._srv.send(msg)
-        payload = apns.Payload(alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), sound="default", badge=1)
-        [ self._srv.gateway_server.send_notification(t, payload) for t in set(toks[0:-1]) ]
+        # for t in set(toks[0:-1]):
+        #     srv = apns.APNs(use_sandbox=True, cert_file=self._certFile)
+        #     payload = apns.Payload(alert="%s %s..."%(s['oth'], base64.b64decode(s['msg']).decode('utf8')), sound="default", badge=1)
+        #     srv.gateway_server.send_notification(t, payload)
+    
+        pu = self.push.create_push()
+        pu.audience = {'alias' : toks[0:-1]}
+        # pu.audience = jpush.audience(jpush.alias('f5990b6e3f5941b281c3d3966ab6a494'))
+        # pu.notification = jpush.ios(alert=u"%s \u6765\u7535..."%toks[-2], sound="income_ring.caf", badge=1)
+        pu.notification = jpush.notification(alert="%s %s..."%(s['oth'], base64.b64decode(s['msg']).decode('utf8')), ios={ 'sound' : "default", 'badge' : 1 })
+        pu.platform = jpush.all_
+        pu.options = { 'apns_production' : self.apns_production }
+        pu.send()
+
+#        payload = apns.Payload(alert="%s %s..."%(s['oth'], base64.b64decode(s['msg'])), sound="default", badge=1)
+#        [ self._srv.gateway_server.send_notification(t, payload) for t in set(toks[0:-1]) ]
         return True
 
 class SmsAsyn(Asyn):
